@@ -19,6 +19,9 @@
 bool sleep_now = false;
 bool send_now = true;
 
+#define LED_PIN  D9
+#define INPUT_PIN  A4
+
 void event_fn( void )
 {
   send_now = true;
@@ -33,20 +36,13 @@ void send()
   const int millivolts = 1212 * 1023 / vref; // 1.212 is nominal reference voltage
   const int charge = max(0, min(255, (millivolts - 1800) * 255 / (3600 - 1800)));
 
-  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, digitalRead(D9) /*input*/, (uint8_t)charge /*battery*/ };
+  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, digitalRead(INPUT_PIN) /*input*/, (uint8_t)charge /*battery*/ };
   //radio_status_t send_rc = 
     Radio.Send( &buf[0], sizeof(buf) );
   //Serial.println("Sent!");
   //Serial.println(send_rc);
   seq++;
 
-  if (digitalRead(D9)) {
-    digitalWrite(A3, LOW);
-    digitalWrite(A4, HIGH);
-  } else {
-    digitalWrite(A4, LOW);
-    digitalWrite(A3, HIGH);
-  }
 }
 
 
@@ -125,13 +121,11 @@ void setup()
   Radio.Sleep();
 
   LowPower.begin();
-  pinMode(D9, INPUT_PULLUP);
-  LowPower.attachInterruptWakeup(D9, event_fn, CHANGE, DEEP_SLEEP_MODE);
+  pinMode(INPUT_PIN, INPUT);
+  LowPower.attachInterruptWakeup(INPUT_PIN, event_fn, CHANGE, DEEP_SLEEP_MODE);
 
-  pinMode(A3, OUTPUT);
-  digitalWrite(A3, LOW);
-  pinMode(A4, OUTPUT);
-  digitalWrite(A4, LOW);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
   
   if (0)
   {
@@ -147,6 +141,12 @@ void loop()
   if (send_now)
   {
     send_now = false;
+
+    digitalWrite(LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(LED_PIN, LOW);
+
+
     send();
   }
 
