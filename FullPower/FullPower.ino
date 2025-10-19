@@ -31,11 +31,7 @@ void send(bool locked)
   delay(20);
   digitalWrite(LED_PIN, HIGH);
 
-  const int vref = analogRead(AVREF);
-  const int millivolts = 1212 * 1023 / vref; // 1.212 is nominal reference voltage
-  const int charge = max(0, min(255, (millivolts - 1800) * 255 / (3600 - 1800)));
-
-  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, locked, (uint8_t)charge /*battery*/ };
+  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, locked, 100 /*battery*/ };
   radio_status_t send_rc = Radio.Send( &buf[0], sizeof(buf) );
   Serial.println("Sent!");
   seq++;
@@ -49,6 +45,7 @@ void OnRadioTxDone( void )
 }
 void OnRadioTxTimeout( void )
 {
+  Serial.println("TxTimeout");
   Radio.Rx(0); // continuous reception
 }
 
