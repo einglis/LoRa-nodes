@@ -19,9 +19,11 @@
 #define DEVBOARD
 #ifdef DEVBOARD
   #define INPUT_PIN         D9
+  #define INPUT_MODE        INPUT_PULLUP
   #define LED_PIN           19
 #else
   #define INPUT_PIN         A4
+  #define INPUT_MODE        INPUT // external pullup
   #define LED_PIN           D9
 #endif
 
@@ -114,7 +116,7 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH); // active low
 
-  pinMode(INPUT_PIN, INPUT_PULLUP);
+  pinMode(INPUT_PIN, INPUT_MODE);
   LowPower.begin();
   LowPower.attachInterruptWakeup(INPUT_PIN, event_fn, CHANGE, DEEP_SLEEP_MODE);
   rtc.attachInterrupt(alarm_fn, STM32RTC::ALARM_A);
@@ -127,6 +129,7 @@ int sleeps_seen = 0;
 
 static const int intervals_sec[] = { 3, 10, 60, 15*60 };
 static const int num_intervals = sizeof(intervals_sec)/sizeof(intervals_sec[0]);
+static int nextInterval = intervals_sec[0];
 
 static bool debounce = false;
 static int last_sent = -1;
@@ -134,8 +137,6 @@ static int last_sent = -1;
 void send_and_reschedule(bool event)
 {
   int input = digitalRead(INPUT_PIN);
-
-  int nextInterval = intervals_sec[0];
 
   if (event) {
     if (debounce) {
