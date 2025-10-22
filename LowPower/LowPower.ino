@@ -16,7 +16,7 @@
 // https://github.com/stm32duino/STM32LowPower
 // https://github.com/stm32duino/STM32RTC
 
-#define DEVBOARD
+#undef DEVBOARD
 #ifdef DEVBOARD
   #define INPUT_PIN         D9
   #define INPUT_MODE        INPUT_PULLUP
@@ -39,9 +39,6 @@ uint8_t seq = 0;
 
 void send(uint8_t value)
 {
-  Serial.print("send ");
-  Serial.println(value);
-
   digitalWrite(LED_PIN, LOW); // active low
   delay(20);
   digitalWrite(LED_PIN, HIGH);
@@ -57,12 +54,10 @@ void send(uint8_t value)
 
 void OnRadioTxDone( void )
 {
-  Serial.println("TxDone");
   sleeps_count++;
 }
 void OnRadioTxTimeout( void )
 {
-  Serial.println("TxTimeout");
   sleeps_count++; // oh well!
 }
 
@@ -71,14 +66,6 @@ STM32RTC& rtc = STM32RTC::getInstance();
 
 void setup()
 {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  while (!Serial);
-
-  Serial.println("");
-  Serial.println("");
-  Serial.println("I am booting");
-
   const uint32_t unique_id = LL_FLASH_GetUDN();
   my_id[0] =  unique_id       & 0xff;
   my_id[1] = (unique_id >> 8) & 0xff;
@@ -140,20 +127,16 @@ void send_and_reschedule(bool event)
 
   if (event) {
     if (debounce) {
-        Serial.println("currently in debounce; ignore");
         return;
     } else {
-        Serial.println("send now, restart sequence");
         nextInterval = intervals_sec[0];
         debounce = true;
     }
   } else { // alarm
     if (debounce && (input != last_sent)) {
-        Serial.println("completed debounce but change of state; restart sequence");
         nextInterval == intervals_sec[0];
         debounce = true;
     } else {
-        Serial.println("regular alarm; cancel debounce; advance sequence");
         debounce = false;
 
         for (int i = 0; i < num_intervals - 1; i++) {
@@ -167,13 +150,6 @@ void send_and_reschedule(bool event)
 
   send(input);
   last_sent = input;
-
-  Serial.print("Resend in ");
-  Serial.println(nextInterval);
-  Serial.print(" Now ");
-  Serial.println(rtc.getEpoch());
-  Serial.print("Wake ");
-  Serial.println(rtc.getEpoch() + nextInterval);
 
   rtc.disableAlarm(STM32RTC::ALARM_A);
   rtc.setAlarmEpoch(rtc.getEpoch() + nextInterval, STM32RTC::MATCH_DHHMMSS, 0, STM32RTC::ALARM_A);
@@ -198,14 +174,7 @@ void loop()
   if (sleeps_count != sleeps_seen) {
     sleeps_seen = sleeps_count;
 
-    Serial.println("zzzzz");
-    delay(100);
-
     Radio.Sleep();
     LowPower.deepSleep();
-
-    Serial.begin(115200);
-    while (!Serial);
-    Serial.println("awake");
   }
 }
