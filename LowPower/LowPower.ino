@@ -16,49 +16,56 @@
 // https://github.com/stm32duino/STM32LowPower
 // https://github.com/stm32duino/STM32RTC
 
-bool sleep_now = false;
-bool send_now = true;
+#define DEVBOARD
+#ifdef DEVBOARD
+  #define INPUT_PIN         D9
+  #define LED_PIN           19
+#else
+  #define INPUT_PIN         A4
+  #define LED_PIN           D9
+#endif
 
-#define LED_PIN  D9
-#define INPUT_PIN  A4
+volatile int events_count = 0;
+volatile int sleeps_count = 0;
+volatile int alarms_count = 0;
 
-void event_fn( void )
-{
-  send_now = true;
-}
+void event_fn(void) { events_count++; }
+void alarm_fn(void *) { alarms_count++; }
 
 uint8_t my_id[2] = { 0 };
 uint8_t seq = 0;
 
-void send()
+void send(uint8_t value)
 {
+  Serial.print("send ");
+  Serial.println(value);
+
+  digitalWrite(LED_PIN, LOW); // active low
+  delay(20);
+  digitalWrite(LED_PIN, HIGH);
+
   const int vref = analogRead(AVREF);
   const int millivolts = 1212 * 1023 / vref; // 1.212 is nominal reference voltage
   const int charge = max(0, min(255, (millivolts - 1800) * 255 / (3600 - 1800)));
 
-  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, digitalRead(INPUT_PIN) /*input*/, (uint8_t)charge /*battery*/ };
-  //radio_status_t send_rc = 
-    Radio.Send( &buf[0], sizeof(buf) );
-  //Serial.println("Sent!");
-  //Serial.println(send_rc);
+  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, value, (uint8_t)charge /*battery*/ };
+  Radio.Send( &buf[0], sizeof(buf) );
   seq++;
-
 }
-
 
 void OnRadioTxDone( void )
 {
-  //Serial.println("TxDone");
-  sleep_now = true;
+  Serial.println("TxDone");
+  sleeps_count++;
 }
 void OnRadioTxTimeout( void )
 {
-  //Serial.println("TxTimeout");
-  sleep_now = true; // oh well!
+  Serial.println("TxTimeout");
+  sleeps_count++; // oh well!
 }
 
 RadioEvents_t RadioEvents = { 0 };
-
+STM32RTC& rtc = STM32RTC::getInstance();
 
 void setup()
 {
@@ -66,17 +73,18 @@ void setup()
   Serial.begin(115200);
   while (!Serial);
 
+  Serial.println("");
+  Serial.println("");
+  Serial.println("I am booting");
+
   const uint32_t unique_id = LL_FLASH_GetUDN();
   my_id[0] =  unique_id       & 0xff;
   my_id[1] = (unique_id >> 8) & 0xff;
 
-
-  STM32RTC& rtc = STM32RTC::getInstance();
   rtc.setClockSource(STM32RTC::LSE_CLOCK);
   rtc.setBinaryMode(STM32RTC::MODE_MIX);
   rtc.begin(true, STM32RTC::HOUR_24);
   UTIL_TIMER_Init(rtc.getHandle());
-
 
   RadioEvents.TxDone = OnRadioTxDone;
   RadioEvents.TxTimeout = OnRadioTxTimeout;
@@ -101,59 +109,102 @@ void setup()
     1000 // tx timeout (ms)
   );
 
-  // Radio.SetRxConfig(
-  //   MODEM_LORA,
-  //   0, // bandwidth = 125kHz
-  //   7, // spreading factor
-  //   RADIO_LORA_CR_4_5,
-  //   0, // n/a
-  //   8, // preamble
-  //   8, // ?? - symbol timeout
-  //   false, // == variable length packets
-  //   0, // n/a (fixed payload length)
-  //   true, // == crc on
-  //   false, // == no frequency hopping
-  //   0, // n/a (hop period)
-  //   false, // IQ not inverted
-  //   true // continuous receive
-  // );
-
   Radio.Sleep();
 
-  LowPower.begin();
-  pinMode(INPUT_PIN, INPUT);
-  LowPower.attachInterruptWakeup(INPUT_PIN, event_fn, CHANGE, DEEP_SLEEP_MODE);
-
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
-  if (0)
-  {
-    Serial.println("Wakeup delay");
-    delay(10*1000);
+  digitalWrite(LED_PIN, HIGH); // active low
+
+  pinMode(INPUT_PIN, INPUT_PULLUP);
+  LowPower.begin();
+  LowPower.attachInterruptWakeup(INPUT_PIN, event_fn, CHANGE, DEEP_SLEEP_MODE);
+  rtc.attachInterrupt(alarm_fn, STM32RTC::ALARM_A);
+}
+
+
+int alarms_seen = 0;
+int events_seen = -1; // force an event on startup
+int sleeps_seen = 0;
+
+static const int intervals_sec[] = { 3, 10, 60, 15*60 };
+static const int num_intervals = sizeof(intervals_sec)/sizeof(intervals_sec[0]);
+
+static bool debounce = false;
+static int last_sent = -1;
+
+void send_and_reschedule(bool event)
+{
+  int input = digitalRead(INPUT_PIN);
+
+  int nextInterval = intervals_sec[0];
+
+  if (event) {
+    if (debounce) {
+        Serial.println("currently in debounce; ignore");
+        return;
+    } else {
+        Serial.println("send now, restart sequence");
+        nextInterval = intervals_sec[0];
+        debounce = true;
+    }
+  } else { // alarm
+    if (debounce && (input != last_sent)) {
+        Serial.println("completed debounce but change of state; restart sequence");
+        nextInterval == intervals_sec[0];
+        debounce = true;
+    } else {
+        Serial.println("regular alarm; cancel debounce; advance sequence");
+        debounce = false;
+
+        for (int i = 0; i < num_intervals - 1; i++) {
+          if (nextInterval <= intervals_sec[i]) {
+            nextInterval = intervals_sec[i+1];
+            break;
+          }
+        }
+    }
   }
+
+  send(input);
+  last_sent = input;
+
+  Serial.print("Resend in ");
+  Serial.println(nextInterval);
+  Serial.print(" Now ");
+  Serial.println(rtc.getEpoch());
+  Serial.print("Wake ");
+  Serial.println(rtc.getEpoch() + nextInterval);
+
+  rtc.disableAlarm(STM32RTC::ALARM_A);
+  rtc.setAlarmEpoch(rtc.getEpoch() + nextInterval, STM32RTC::MATCH_DHHMMSS, 0, STM32RTC::ALARM_A);
 }
 
 void loop()
 {
   LoRaMacProcess();
 
-  if (send_now)
-  {
-    send_now = false;
+  if (events_count != events_seen) {
+    events_seen = events_count;
 
-    digitalWrite(LED_PIN, HIGH);
-    delay(100);
-    digitalWrite(LED_PIN, LOW);
-
-
-    send();
+    send_and_reschedule(true);
   }
 
-  if (sleep_now)
-  {
-    sleep_now = false;
-    LowPower.deepSleep(60*1000 /*ms*/);
-    send_now = true;
+  if (alarms_count != alarms_seen) {
+    alarms_seen = alarms_count;
+
+    send_and_reschedule(false);
+  }
+
+  if (sleeps_count != sleeps_seen) {
+    sleeps_seen = sleeps_count;
+
+    Serial.println("zzzzz");
+    delay(100);
+
+    Radio.Sleep();
+    LowPower.deepSleep();
+
+    Serial.begin(115200);
+    while (!Serial);
+    Serial.println("awake");
   }
 }

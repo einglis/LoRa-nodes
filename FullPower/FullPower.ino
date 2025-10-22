@@ -23,7 +23,7 @@ long lastSendTime = millis();
 uint8_t my_id[2] = { 0 };
 uint8_t seq = 0;
 
-void send(bool locked)
+void send(uint8_t value)
 {
   lastSendTime = millis();
 
@@ -31,7 +31,7 @@ void send(bool locked)
   delay(20);
   digitalWrite(LED_PIN, HIGH);
 
-  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, locked, 100 /*battery*/ };
+  uint8_t buf[] = { 0x38, 0x05, my_id[0], my_id[1], seq, value, 255 /*battery*/ };
   radio_status_t send_rc = Radio.Send( &buf[0], sizeof(buf) );
   Serial.println("Sent!");
   seq++;
@@ -238,8 +238,10 @@ void loop()
   digitalWrite(LOCKED_LED_PIN, !locked && !blink);
 
 
-  static const long intervals[] = { 3*1000, 10*1000, 60*1000, 15*60*1000 };
-  static long nextInterval = intervals[0];
+  static const long intervals_ms[] = { 3*1000, 10*1000, 60*1000, 15*60*1000 };
+  static const int num_intervals = sizeof(intervals_ms)/sizeof(intervals_ms[0]);
+
+  static long nextInterval = intervals_ms[0];
 
   static bool last_sent = !locked;
   if (last_sent ^ locked)
@@ -249,15 +251,11 @@ void loop()
     send(locked);
     last_sent = locked;
 
-    for (int i = 0; i < sizeof(intervals)/sizeof(intervals[0]) - 1; i++) {
-      if (nextInterval <= intervals[i]) {
-        nextInterval = intervals[i+1];
+    for (int i = 0; i < num_intervals - 1; i++) {
+      if (nextInterval <= intervals_ms[i]) {
+        nextInterval = intervals_ms[i+1];
         break;
       }
     }
-
-    Serial.print("Resend in ");
-    Serial.print(nextInterval / 1000);
-    Serial.println(" seconds");
   }
 }
